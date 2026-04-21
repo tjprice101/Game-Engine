@@ -1,84 +1,74 @@
 #version 450 core
 // light_point.frag — Accumulates one point light into the HDR light buffer.
-// Reads GBuffer (albedo/normal), shadow map, computes final lit colour.
-// This pass is additively blended.
+// Additively blended over the light FBO.
+//
+// Works in screen UV space [0..1] to match LightSystem.cpp's computation.
+// uLightColor already contains color * intensity (pre-multiplied by C++).
 
 in  vec2 vScreenUV;
 out vec4 fragColor;
 
-uniform sampler2D uGAlbedoSpec;     // RGBA8: rgb=albedo, a=specular
-uniform sampler2D uGNormalEmissive; // RGB16F: rg=normal encoded, b=emissive
-uniform sampler2D uShadowMap;       // 512×1 R16F: distance to occluder by angle
-uniform sampler2D uOccluder;        // for debug / edge softening
+uniform sampler2D uShadowMap;    // 512×1 R16F: normalized hit distance per angle
+uniform sampler2D uGBuffer;      // GBuffer normals (optional, slot 1)
 
-uniform vec2  uLightPosUV;    // light world pos mapped to screen UV
-uniform vec3  uLightColor;    // HDR light colour (can be > 1)
-uniform float uLightRadius;   // in screen pixels (post-projection)
-uniform float uLightIntensity;
+uniform vec2  uLightUV;          // light center in screen UV [0..1]
+uniform float uLightRadiusUV;    // light radius in UV space
+uniform vec3  uLightColor;       // HDR colour * intensity (pre-multiplied)
+uniform int   uUseNormals;       // 1 = sample GBuffer for normal-mapped diffuse
 
-layout(std140, binding = 0) uniform CameraUBO {
-    mat4  uViewProj;
-    vec2  uCameraPos;
-    vec2  uViewportSize;
-    float uZoom;
-    float _pad[3];
-};
+// ---- Soft shadow (PCF over 3 samples) ---------------------------------------
+float sampleShadow(vec2 angleUV, float distN) {
+    float s0 = texture(uShadowMap, vec2(angleUV.x,          0.5)).r;
+    float s1 = texture(uShadowMap, vec2(angleUV.x + 0.002,  0.5)).r;
+    float s2 = texture(uShadowMap, vec2(angleUV.x - 0.002,  0.5)).r;
+
+    // Bias prevents self-shadowing from shadow map quantisation
+    const float BIAS = 0.006;
+    float lit = 0.0;
+    lit += (distN < s0 + BIAS) ? 1.0 : 0.0;
+    lit += (distN < s1 + BIAS) ? 1.0 : 0.0;
+    lit += (distN < s2 + BIAS) ? 1.0 : 0.0;
+    return lit * (1.0 / 3.0);
+}
 
 void main() {
-    vec2 fragUV = vScreenUV;
+    vec2 fragUV  = vScreenUV;
+    vec2 toLight = fragUV - uLightUV;   // vector from fragment to light (UV space)
+    float dist   = length(toLight);
 
-    // ---- Albedo + specular --------------------------------------------------
-    vec4 albedoSpec = texture(uGAlbedoSpec, fragUV);
-    vec3 albedo     = albedoSpec.rgb;
-    float specStr   = albedoSpec.a;
+    // Early-out: outside influence radius
+    if (dist > uLightRadiusUV) { fragColor = vec4(0.0); return; }
 
-    // ---- Normal (decode XY, reconstruct Z) ----------------------------------
-    vec3 nEnc = texture(uGNormalEmissive, fragUV);
-    vec2 n2   = nEnc.rg * 2.0 - 1.0;
-    float nz  = sqrt(max(0.0, 1.0 - dot(n2, n2)));
-    vec3 norm = normalize(vec3(n2, nz));
-
-    float emissive = nEnc.b;
-
-    // ---- Fragment world position (recover from UV + camera) -----------------
-    vec2 fragPos = (fragUV - 0.5) * uViewportSize / uZoom + uCameraPos;
-    vec2 lightPosWorld = (uLightPosUV - 0.5) * uViewportSize / uZoom + uCameraPos;
-
-    vec2 toLight     = fragPos - lightPosWorld;
-    float dist       = length(toLight);
-    if (dist > uLightRadius) { fragColor = vec4(0.0); return; }
+    float distN = dist / uLightRadiusUV; // 0 at light, 1 at edge
 
     // ---- Shadow map lookup --------------------------------------------------
-    float angle  = atan(toLight.y, toLight.x);   // -π..π
-    float angleN = angle / 6.2831853 + 0.5;      // 0..1
-    float shadowDist = texture(uShadowMap, vec2(angleN, 0.5)).r; // normalised 0..1
+    float angle  = atan(toLight.y, toLight.x);
+    float angleN = angle / 6.2831853 + 0.5; // 0..1
+    float shadow = sampleShadow(vec2(angleN, 0.5), distN);
 
-    // Hard shadow: is this fragment farther than the shadow hit?
-    float occluderDist = shadowDist * uLightRadius;
-    float shadow = (dist < occluderDist + 1.5) ? 1.0 : 0.0;
+    // ---- Smooth attenuation (inverse-square feel, clamped at edge) ----------
+    float atten = 1.0 - smoothstep(0.0, 1.0, distN);
+    atten = atten * atten; // extra falloff punch
 
-    // Soft penumbra (PCF-like, 2-tap)
-    float shadow2 = (dist < texture(uShadowMap, vec2(angleN + 0.002, 0.5)).r * uLightRadius + 1.5) ? 1.0 : 0.0;
-    shadow = mix(shadow, shadow2, 0.5);
+    // ---- Optional normal-map diffuse ----------------------------------------
+    float diffuse = 1.0;
+    if (uUseNormals != 0) {
+        vec3 nEnc = texture(uGBuffer, fragUV).rgb;
+        vec2 n2   = nEnc.rg * 2.0 - 1.0;
+        float nz  = sqrt(max(0.0, 1.0 - dot(n2, n2)));
+        vec3 norm = normalize(vec3(n2, nz));
 
-    // ---- Attenuation --------------------------------------------------------
-    // Inverse-square with smooth falloff at edge
-    float atten = 1.0 - smoothstep(uLightRadius * 0.0, uLightRadius, dist);
-    atten = atten * atten; // steeper falloff
+        // Light direction in view-aligned 3D (z = depth bias for 2D feel)
+        vec3 lightDir3 = normalize(vec3(-toLight, 0.4));
+        diffuse = max(0.1, dot(norm, lightDir3));
+    }
 
-    // ---- Normal-mapped diffuse ----------------------------------------------
-    vec3  lightDir3 = normalize(vec3(-toLight.x, -toLight.y, uLightRadius * 0.3));
-    float diffuse   = max(0.0, dot(norm, lightDir3));
+    // ---- Final contribution -------------------------------------------------
+    vec3 light = uLightColor * atten * shadow * diffuse;
 
-    // ---- Specular (Blinn-Phong) ---------------------------------------------
-    vec3  viewDir  = vec3(0.0, 0.0, 1.0); // 2D: view always from z+
-    vec3  halfDir  = normalize(lightDir3 + viewDir);
-    float spec     = pow(max(dot(norm, halfDir), 0.0), 32.0) * specStr;
-
-    // ---- Combine ------------------------------------------------------------
-    vec3 light = uLightColor * uLightIntensity
-               * atten * shadow
-               * (albedo * diffuse + spec);
+    // Soft glow falloff at the very center (avoids harsh hotspot)
+    float centerGlow = 1.0 - smoothstep(0.0, 0.15, distN);
+    light += uLightColor * centerGlow * 0.2;
 
     fragColor = vec4(light, 1.0);
 }

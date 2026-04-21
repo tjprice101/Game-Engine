@@ -104,3 +104,5 @@ private:
 
     std::vector<ParticleInstance> m_gpuData;
 };
+
+using ParticleManager = ParticleSystem;

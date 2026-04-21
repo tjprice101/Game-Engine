@@ -5,12 +5,12 @@
 in  vec2 vScreenUV;
 out vec4 fragColor;
 
-uniform sampler2D uHDRBuffer;
+uniform sampler2D uScene;
 uniform float     uThreshold; // e.g. 1.0
 uniform float     uKnee;      // soft knee (e.g. 0.2)
 
 void main() {
-    vec3 color = texture(uHDRBuffer, vScreenUV).rgb;
+    vec3 color = texture(uScene, vScreenUV).rgb;
 
     float brightness = dot(color, vec3(0.2126, 0.7152, 0.0722));
 

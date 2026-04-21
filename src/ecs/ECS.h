@@ -204,7 +204,7 @@ public:
         if (!p) return;
         for (size_t i = 0; i < p->size(); ++i) {
             EntityID e = makeEntity(p->entityAt(i), m_generations[p->entityAt(i)]);
-            fn(e, (*p->begin() + i));
+            fn(e, *(p->begin() + i));
         }
     }
 

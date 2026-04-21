@@ -46,7 +46,7 @@ void main() {
     vec3 albedo = texel.rgb;
 
     // Sobel normal from atlas texel neighbourhood (atlas texel size = 1/atlasW)
-    vec2 texelSize = vec2(1.0/512.0, 1.0/512.0); // atlas is 512x512
+    vec2 texelSize = vec2(1.0/128.0, 1.0/128.0); // atlas is 128x128 (8x8 grid of 16px tiles)
     vec2 n2 = sobelNormal(vUV, texelSize);
     // Encode to 0..1 range for 16F buffer storage
     vec2 encodedN = n2 * 0.5 + 0.5;
