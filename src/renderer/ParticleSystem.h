@@ -93,7 +93,7 @@ private:
     void spawnOne(const ParticleEmitter& cfg);
     int  findFreeSlot();
 
-    Particle         m_particles[MAX_PARTICLES] = {};
+    Particle         m_particles[MAX_PARTICLES];
     std::vector<ParticleEmitter> m_emitters;
 
     GLuint m_vao           = 0;

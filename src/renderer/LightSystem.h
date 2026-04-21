@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <array>
+#include <functional>
 #include "renderer/Shader.h"
 #include "renderer/RenderTarget.h"
 #include "renderer/Camera.h"

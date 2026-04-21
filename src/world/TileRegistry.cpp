@@ -1,4 +1,5 @@
 #include "TileRegistry.h"
+#include <vector>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>

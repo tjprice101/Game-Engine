@@ -21,6 +21,9 @@ public:
     RenderTarget(const RenderTarget&)            = delete;
     RenderTarget& operator=(const RenderTarget&) = delete;
 
+    RenderTarget(RenderTarget&& o) noexcept;
+    RenderTarget& operator=(RenderTarget&& o) noexcept;
+
     // ---- Configuration (call before build) ----------------------------------
     void addColorAttachment(int w, int h,
                             GLenum internalFmt = GL_RGBA8,

@@ -1,39 +1,31 @@
 #version 450 core
+// composite.frag — GBuffer combination pass.
+// Combines: albedo × (accumulated_light + ambient) + albedo × emissive → HDR FBO.
+// Input: GBuffer textures + light accumulation FBO.
+// Output: HDR RGBA16F colour ready for PostProcess (bloom, tonemap, etc).
 
-in vec2 vTexCoord;
+in  vec2 vScreenUV;
 out vec4 fragColor;
 
-uniform sampler2D uScene;
-uniform float     uAmbient;   // 0..1 minimum light everywhere (sky / time-of-day)
-uniform float     uGamma;     // typically 2.2
-uniform float     uContrast;  // 1.0 = neutral
-uniform float     uSaturation;// 1.0 = neutral
-
-// Vignette
-uniform float uVignetteStrength; // 0 = off, 0.5 = subtle
-
-vec3 adjustSaturation(vec3 color, float sat) {
-    float lum = dot(color, vec3(0.299, 0.587, 0.114));
-    return mix(vec3(lum), color, sat);
-}
+uniform sampler2D uGAlbedo;       // GBuffer attachment 0: rgb=albedo, a=specular
+uniform sampler2D uGNormEmissive; // GBuffer attachment 1: rg=normal enc, b=emissive
+uniform sampler2D uLightBuffer;   // HDR light accumulation
+uniform float     uSunlight;      // 0..1 ambient sunlight level (day/night)
 
 void main() {
-    vec3 sceneColor = texture(uScene, vTexCoord).rgb;
+    vec2 uv = vScreenUV;
 
-    // Contrast (S-curve approximation)
-    sceneColor = ((sceneColor - 0.5) * uContrast) + 0.5;
-    sceneColor = clamp(sceneColor, 0.0, 1.0);
+    vec3  albedo    = texture(uGAlbedo,       uv).rgb;
+    float emissive  = texture(uGNormEmissive, uv).b;
+    vec3  light     = texture(uLightBuffer,   uv).rgb;
 
-    // Saturation
-    sceneColor = adjustSaturation(sceneColor, uSaturation);
+    // Ambient colour: cool night → warm day
+    vec3 ambient = mix(vec3(0.04, 0.05, 0.09), vec3(0.82, 0.79, 0.70), uSunlight);
 
-    // Vignette
-    vec2 uv = vTexCoord * 2.0 - 1.0;
-    float vignette = 1.0 - uVignetteStrength * dot(uv, uv);
-    sceneColor *= clamp(vignette, 0.0, 1.0);
+    // HDR composite: diffuse + emissive glow
+    vec3 hdr = albedo * (light + ambient)
+             + albedo * emissive * 2.8;
 
-    // Gamma correction
-    sceneColor = pow(sceneColor, vec3(1.0 / uGamma));
-
-    fragColor = vec4(sceneColor, 1.0);
+    fragColor = vec4(hdr, 1.0);
 }
+

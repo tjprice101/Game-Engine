@@ -1,5 +1,32 @@
 #include "RenderTarget.h"
 #include <stdexcept>
+#include <utility>
+
+// ---- Move semantics ---------------------------------------------------------
+RenderTarget::RenderTarget(RenderTarget&& o) noexcept
+    : m_fbo(o.m_fbo), m_rbo(o.m_rbo),
+      m_specs(std::move(o.m_specs)),
+      m_colorTextures(std::move(o.m_colorTextures)),
+      m_hasDepth(o.m_hasDepth),
+      m_width(o.m_width), m_height(o.m_height)
+{
+    o.m_fbo = 0; o.m_rbo = 0;
+}
+
+RenderTarget& RenderTarget::operator=(RenderTarget&& o) noexcept {
+    if (this != &o) {
+        destroy();
+        m_fbo           = o.m_fbo;
+        m_rbo           = o.m_rbo;
+        m_specs         = std::move(o.m_specs);
+        m_colorTextures = std::move(o.m_colorTextures);
+        m_hasDepth      = o.m_hasDepth;
+        m_width         = o.m_width;
+        m_height        = o.m_height;
+        o.m_fbo = 0; o.m_rbo = 0;
+    }
+    return *this;
+}
 
 void RenderTarget::addColorAttachment(int w, int h,
                                        GLenum internalFmt,

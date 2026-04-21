@@ -50,23 +50,24 @@ void RenderPipeline::init(int viewW, int viewH) {
 
     // ---- Load shaders via ShaderLibrary -------------------------------------
     auto& sl = ShaderLibrary::instance();
-    sl.load("sky",       "assets/shaders/bg.vert",         "assets/shaders/bg.frag");
-    sl.load("tile_lit",  "assets/shaders/tile_lit.vert",   "assets/shaders/tile_lit.frag");
-    sl.load("sprite",    "assets/shaders/sprite.vert",     "assets/shaders/sprite.frag");
-    sl.load("occluder",  "assets/shaders/occluder.vert",   "assets/shaders/occluder.frag");
-    sl.load("shadow_1d", "assets/shaders/fullscreen.vert", "assets/shaders/shadow_1d.frag");
-    sl.load("light_pt",  "assets/shaders/fullscreen.vert", "assets/shaders/light_point.frag");
-    sl.load("bloom_thr", "assets/shaders/fullscreen.vert", "assets/shaders/bloom_threshold.frag");
-    sl.load("bloom_blur","assets/shaders/fullscreen.vert", "assets/shaders/bloom_blur.frag");
-    sl.load("tonemap",   "assets/shaders/fullscreen.vert", "assets/shaders/tonemap.frag");
-    sl.load("particles", "assets/shaders/particles.vert",  "assets/shaders/particles.frag");
-    sl.load("ui",        "assets/shaders/ui.vert",         "assets/shaders/ui.frag");
+    sl.load("sky",             "assets/shaders/bg.vert",         "assets/shaders/bg.frag");
+    sl.load("tile_lit",        "assets/shaders/tile_lit.vert",   "assets/shaders/tile_lit.frag");
+    sl.load("sprite",          "assets/shaders/sprite.vert",     "assets/shaders/sprite.frag");
+    sl.load("occluder",        "assets/shaders/occluder.vert",   "assets/shaders/occluder.frag");
+    sl.load("shadow_1d",       "assets/shaders/fullscreen.vert", "assets/shaders/shadow_1d.frag");
+    sl.load("light_point",     "assets/shaders/fullscreen.vert", "assets/shaders/light_point.frag");
+    sl.load("bloom_threshold", "assets/shaders/fullscreen.vert", "assets/shaders/bloom_threshold.frag");
+    sl.load("bloom_blur",      "assets/shaders/fullscreen.vert", "assets/shaders/bloom_blur.frag");
+    sl.load("composite",       "assets/shaders/fullscreen.vert", "assets/shaders/composite.frag");
+    sl.load("tonemap",         "assets/shaders/fullscreen.vert", "assets/shaders/tonemap.frag");
+    sl.load("particles",       "assets/shaders/particles.vert",  "assets/shaders/particles.frag");
+    sl.load("ui",              "assets/shaders/ui.vert",         "assets/shaders/ui.frag");
 
-    m_skyShader       = sl.get("sky");
-    m_tileLitShader   = sl.get("tile_lit");
-    m_spriteShader    = sl.get("sprite");
-    m_compositeShader = sl.get("tonemap");
-    m_uiShader        = sl.get("ui");
+    m_skyShader       = &sl.get("sky");
+    m_tileLitShader   = &sl.get("tile_lit");
+    m_spriteShader    = &sl.get("sprite");
+    m_compositeShader = &sl.get("composite");
+    m_uiShader        = &sl.get("ui");
 }
 
 void RenderPipeline::onResize(int w, int h) {
@@ -88,7 +89,7 @@ void RenderPipeline::uploadCameraUBO(const Camera& cam) {
     data._pad0        = 0.f;
     data.viewport[0]  = cam.viewportWidth();
     data.viewport[1]  = cam.viewportHeight();
-    m_cameraUBO.update(&data, sizeof(data));
+    m_cameraUBO.update(&data);
 }
 
 void RenderPipeline::uploadFrameDataUBO(float time, float dayTime, float sunlight, float /*wind*/) {
@@ -99,7 +100,7 @@ void RenderPipeline::uploadFrameDataUBO(float time, float dayTime, float sunligh
     data.sunlight  = sunlight;
     data.screenW   = (float)m_vpW;
     data.screenH   = (float)m_vpH;
-    m_frameUBO.update(&data, sizeof(data));
+    m_frameUBO.update(&data);
 }
 
 // ---- Fullscreen quad --------------------------------------------------------
@@ -165,22 +166,22 @@ void RenderPipeline::render(
 
     // Occluder pass callback: render tiles with occluder shader
     m_lightSys.compute([&]() {
-        if (!m_tileLitShader) return;
-        Shader* occ = ShaderLibrary::instance().get("occluder");
-        if (!occ) return;
+        auto& slInner = ShaderLibrary::instance();
+        if (!slInner.has("occluder")) return;
+        Shader& occ = slInner.get("occluder");
 
-        occ->bind();
+        occ.bind();
         const Texture& atlas = TileRegistry::instance().atlas();
         atlas.bind(0);
-        occ->setInt("uAtlas", 0);
-        occ->setVec2("uTileSize", {TILE_SIZE, TILE_SIZE});
-        occ->setVec2("uAtlasCellSize", {ATLAS_CELL_SIZE, ATLAS_CELL_SIZE});
+        occ.setInt("uAtlas", 0);
+        occ.setVec2("uTileSize", {TILE_SIZE, TILE_SIZE});
+        occ.setVec2("uAtlasCellSize", {ATLAS_CELL_SIZE, ATLAS_CELL_SIZE});
 
         // Draw only solid main-layer tiles
         for (auto& [coord, chunk] : world.chunks()) {
             const auto& insts = chunk->instances();
             if (insts.empty()) continue;
-            m_tileRenderer.draw(insts, atlas, *occ, camera, TILE_SIZE, ATLAS_CELL_SIZE);
+            m_tileRenderer.draw(insts, atlas, occ, camera, TILE_SIZE, ATLAS_CELL_SIZE);
         }
     });
 
@@ -197,7 +198,7 @@ void RenderPipeline::render(
     passComposite(sunlight);
 
     // ---- [8] Post-process: bloom → tonemap → grade → effects → screen --------
-    m_postProc.apply(m_hdrFBO.colorTexture(0), m_postProc.settings());
+    m_postProc.apply(m_hdrFBO.colorTexture(0).id(), m_postProc.settings());
 
     // ---- [9] UI pass (on top of everything) ---------------------------------
     passUI(ui, m_vpW, m_vpH);
@@ -303,54 +304,34 @@ void RenderPipeline::passComposite(float sunlight) {
     m_compositeShader->bind();
 
     // GBuffer textures
-    m_gBuffer.bindColorTex(0, 0);  // albedo/spec → slot 0
-    m_gBuffer.bindColorTex(1, 1);  // normal/emissive → slot 1
+    m_gBuffer.bindColorTex(0, 0);   // albedo/spec → slot 0
+    m_gBuffer.bindColorTex(1, 1);   // normal/emissive → slot 1
     m_compositeShader->setInt("uGAlbedo",       0);
-    m_compositeShader->setInt("uGNormEmissive",  1);
+    m_compositeShader->setInt("uGNormEmissive", 1);
 
-    // Light buffer
+    // Light accumulation buffer
     m_lightSys.bindLightTex(2);
     m_compositeShader->setInt("uLightBuffer", 2);
 
-    // Bloom placeholder (will be filled by PostProcess)
-    m_compositeShader->setInt("uBloom", 3); // slot 3 = empty for now
-
-    // Dummy LUT (slot 4 = no LUT)
-    m_compositeShader->setInt("uLUT", 4);
-
-    // Settings
-    const auto& cfg = m_postProc.settings();
-    m_compositeShader->setFloat("uExposure",       cfg.toneMap.exposure);
-    m_compositeShader->setFloat("uBloomIntensity", cfg.bloom.intensity);
-    m_compositeShader->setFloat("uSaturation",     cfg.colorGrade.saturation);
-    m_compositeShader->setFloat("uContrast",       cfg.colorGrade.contrast);
-    m_compositeShader->setVec3 ("uLift",           cfg.colorGrade.lift);
-    m_compositeShader->setVec3 ("uGamma",          cfg.colorGrade.gamma);
-    m_compositeShader->setVec3 ("uGain",           cfg.colorGrade.gain);
-    m_compositeShader->setFloat("uChromAbStrength",
-        cfg.chromAb.enabled ? cfg.chromAb.strength : 0.f);
-    m_compositeShader->setFloat("uCRTStrength",
-        cfg.crt.enabled ? 1.f : 0.f);
-    m_compositeShader->setFloat("uCRTResolution", 720.f);
-    m_compositeShader->setFloat("uVignetteStrength",
-        cfg.vignette.enabled ? cfg.vignette.strength : 0.f);
-    m_compositeShader->setFloat("uGrainStrength",  0.03f);
-    m_compositeShader->setVec2 ("uTexelSize", {1.f/m_vpW, 1.f/m_vpH});
+    // Ambient sunlight
+    m_compositeShader->setFloat("uSunlight", sunlight);
 
     drawFullscreenQuad();
+    m_compositeShader->unbind();
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glEnable(GL_DEPTH_TEST);
 }
 
 void RenderPipeline::passParticles(const Camera& cam, ParticleManager& particles) {
-    Shader* ps = ShaderLibrary::instance().get("particles");
-    if (!ps) return;
+    auto& sl = ShaderLibrary::instance();
+    if (!sl.has("particles")) return;
+    Shader& ps = sl.get("particles");
 
     // Particles rendered additively over the current back-buffer
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);  // additive
     glDisable(GL_DEPTH_TEST);
-    particles.draw(*ps, cam);
+    particles.draw(ps, cam);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);

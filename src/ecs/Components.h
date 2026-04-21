@@ -154,7 +154,7 @@ struct CLight {
 // ---- CPickup -----------------------------------------------------------------
 // Entity is a world drop that can be attracted to the player and collected
 struct CPickup {
-    ItemType  item        = ItemType::Block_Dirt;
+    ItemType  item        = ItemType::Dirt;
     int       count       = 1;
     float     magnetRange = 80.f;   // pixels, auto-attract beyond this
     float     pickupRange = 16.f;   // pixels, collect on overlap
