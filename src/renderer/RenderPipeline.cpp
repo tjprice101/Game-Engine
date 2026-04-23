@@ -4,6 +4,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 // Atlas is ATLAS_GRID × ATLAS_GRID cells of TILE_PIXEL×TILE_PIXEL pixels
 static constexpr int   ATLAS_COLS = ATLAS_GRID;
@@ -39,6 +40,8 @@ void RenderPipeline::init(int viewW, int viewH) {
     // ---- Sub-systems --------------------------------------------------------
     m_lightSys.init(viewW, viewH);
     m_postProc.init(viewW, viewH);
+    m_trails.init();
+    m_beams.init();
     // SpriteBatch initializes its GPU buffers in its constructor; no separate init needed.
 
     // ---- Fullscreen quad for composite passes --------------------------------
@@ -50,18 +53,18 @@ void RenderPipeline::init(int viewW, int viewH) {
 
     // ---- Load shaders via ShaderLibrary -------------------------------------
     auto& sl = ShaderLibrary::instance();
-    sl.load("sky",             "assets/shaders/bg.vert",         "assets/shaders/bg.frag");
-    sl.load("tile_lit",        "assets/shaders/tile_lit.vert",   "assets/shaders/tile_lit.frag");
-    sl.load("sprite",          "assets/shaders/sprite.vert",     "assets/shaders/sprite.frag");
-    sl.load("occluder",        "assets/shaders/occluder.vert",   "assets/shaders/occluder.frag");
-    sl.load("shadow_1d",       "assets/shaders/fullscreen.vert", "assets/shaders/shadow_1d.frag");
-    sl.load("light_point",     "assets/shaders/fullscreen.vert", "assets/shaders/light_point.frag");
-    sl.load("bloom_threshold", "assets/shaders/fullscreen.vert", "assets/shaders/bloom_threshold.frag");
-    sl.load("bloom_blur",      "assets/shaders/fullscreen.vert", "assets/shaders/bloom_blur.frag");
-    sl.load("composite",       "assets/shaders/fullscreen.vert", "assets/shaders/composite.frag");
-    sl.load("tonemap",         "assets/shaders/fullscreen.vert", "assets/shaders/tonemap.frag");
-    sl.load("particles",       "assets/shaders/particles.vert",  "assets/shaders/particles.frag");
-    sl.load("ui",              "assets/shaders/ui.vert",         "assets/shaders/ui.frag");
+    sl.load("sky",             "bg.vert",         "bg.frag");
+    sl.load("tile_lit",        "tile_lit.vert",   "tile_lit.frag");
+    sl.load("sprite",          "sprite.vert",     "sprite.frag");
+    sl.load("occluder",        "occluder.vert",   "occluder.frag");
+    sl.load("shadow_1d",       "fullscreen.vert", "shadow_1d.frag");
+    sl.load("light_point",     "fullscreen.vert", "light_point.frag");
+    sl.load("bloom_threshold", "fullscreen.vert", "bloom_threshold.frag");
+    sl.load("bloom_blur",      "fullscreen.vert", "bloom_blur.frag");
+    sl.load("composite",       "fullscreen.vert", "composite.frag");
+    sl.load("tonemap",         "fullscreen.vert", "tonemap.frag");
+    sl.load("particles",       "particles.vert",  "particles.frag");
+    sl.load("ui",              "ui.vert",         "ui.frag");
 
     m_skyShader       = &sl.get("sky");
     m_tileLitShader   = &sl.get("tile_lit");
@@ -148,7 +151,12 @@ void RenderPipeline::render(
     uploadFrameDataUBO(time, dayTime, sunlight, 0.f);
 
     // ---- [1] Sky pass -------------------------------------------------------
+    // Render sky to HDR FBO (so it's preserved through post-processing)
+    m_hdrFBO.bind();
+    glViewport(0, 0, m_vpW, m_vpH);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     passSky(dayTime, sunlight, time);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
     // ---- [2+3+5] Light system (occluder → shadow → light accumulation) ------
     m_lightSys.beginFrame(camera, sunlight);
@@ -197,10 +205,20 @@ void RenderPipeline::render(
     // ---- [7] Composite: GBuffer albedo × lights + emissive → HDR FBO --------
     passComposite(sunlight);
 
-    // ---- [8] Post-process: bloom → tonemap → grade → effects → screen --------
+    // ---- [8] Trail pass: additive trails into HDR FBO -----------------------
+    m_hdrFBO.bind();
+    glViewport(0, 0, m_vpW, m_vpH);
+    passTrails(camera);
+
+    // ---- [9] Beam pass: additive beams into HDR FBO -------------------------
+    passBeams(camera, time);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // ---- [10] Post-process: bloom → tonemap → grade → effects → screen ------
+    m_postProc.settings().time = time;
     m_postProc.apply(m_hdrFBO.colorTexture(0).id(), m_postProc.settings());
 
-    // ---- [9] UI pass (on top of everything) ---------------------------------
+    // ---- [11] UI pass (on top of everything) --------------------------------
     passUI(ui, m_vpW, m_vpH);
 }
 
@@ -209,9 +227,7 @@ void RenderPipeline::render(
 void RenderPipeline::passSky(float dayTime, float sunlight, float time) {
     if (!m_skyShader) return;
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, m_vpW, m_vpH);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glDisable(GL_DEPTH_TEST);
 
     m_skyShader->bind();
@@ -244,17 +260,14 @@ void RenderPipeline::passGBuffer(const Camera& cam, World& world) {
 
     // Draw 3 layers: wall (dim), main, deco
     for (auto& [coord, chunk] : world.chunks()) {
-        // Wall layer (dim multiplier handled by instance light values)
         const auto& walls = chunk->wallInstances();
         if (!walls.empty())
             m_tileRenderer.draw(walls, atlas, *m_tileLitShader, cam, TILE_SIZE, ATLAS_CELL_SIZE);
 
-        // Main layer
         const auto& mains = chunk->instances();
         if (!mains.empty())
             m_tileRenderer.draw(mains, atlas, *m_tileLitShader, cam, TILE_SIZE, ATLAS_CELL_SIZE);
 
-        // Decoration layer
         const auto& decos = chunk->decoInstances();
         if (!decos.empty())
             m_tileRenderer.draw(decos, atlas, *m_tileLitShader, cam, TILE_SIZE, ATLAS_CELL_SIZE);
@@ -298,7 +311,8 @@ void RenderPipeline::passComposite(float sunlight) {
 
     m_hdrFBO.bind();
     glViewport(0, 0, m_vpW, m_vpH);
-    glClear(GL_COLOR_BUFFER_BIT);
+    // Don't clear color - we want to composite over the sky
+    // Only manage depth if needed
     glDisable(GL_DEPTH_TEST);
 
     m_compositeShader->bind();
@@ -319,7 +333,6 @@ void RenderPipeline::passComposite(float sunlight) {
     drawFullscreenQuad();
     m_compositeShader->unbind();
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glEnable(GL_DEPTH_TEST);
 }
 
 void RenderPipeline::passParticles(const Camera& cam, ParticleManager& particles) {
@@ -347,4 +360,13 @@ void RenderPipeline::passUI(UISystem& ui, int w, int h) {
 
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
+}
+
+void RenderPipeline::passTrails(const Camera& cam) {
+    m_trails.draw(cam);
+}
+
+void RenderPipeline::passBeams(const Camera& cam, float time) {
+    m_beams.update(0.f); // update is called separately; just draw here
+    m_beams.draw(cam, time);
 }

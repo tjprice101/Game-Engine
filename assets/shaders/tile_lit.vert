@@ -2,11 +2,11 @@
 // tile_lit.vert — Writes tiles to GBuffer (albedo+specular / normal+emissive)
 // Instanced: one draw call per chunk layer.
 
-layout(location = 0) in vec2 aVertPos;   // 0..1 quad positions
-layout(location = 1) in vec2 aTilePos;   // world-pixel position (instance)
-layout(location = 2) in vec2 aAtlasUV;  // atlas top-left UV (instance)
-layout(location = 3) in vec3 aLight;    // RGB light value (instance)
-layout(location = 4) in float aPad;
+layout(location = 0) in vec2 aVertPos;   // 0..1 quad positions (vertex)
+layout(location = 1) in vec2 aVertUV;    // 0..1 quad UVs (vertex)
+layout(location = 2) in vec2 aTilePos;   // world-pixel position (instance)
+layout(location = 3) in vec2 aAtlasUV;  // atlas top-left UV (instance)
+layout(location = 4) in vec3 aLight;    // RGB light value (instance)
 
 layout(std140, binding = 0) uniform CameraUBO {
     mat4 uViewProj;
@@ -34,7 +34,7 @@ out vec2  vWorldPos;
 void main() {
     vec2 worldPos = aTilePos + aVertPos * uTileSize;
     vWorldPos = worldPos;
-    vUV       = aAtlasUV + aVertPos * uAtlasCellSize;
+    vUV       = aAtlasUV + aVertUV * uAtlasCellSize;
     vLight    = aLight;
 
     gl_Position = uViewProj * vec4(worldPos, 0.0, 1.0);

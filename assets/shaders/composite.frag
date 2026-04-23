@@ -15,9 +15,14 @@ uniform float     uSunlight;      // 0..1 ambient sunlight level (day/night)
 void main() {
     vec2 uv = vScreenUV;
 
-    vec3  albedo    = texture(uGAlbedo,       uv).rgb;
+    vec4  albedoSample = texture(uGAlbedo, uv);
+    vec3  albedo    = albedoSample.rgb;
+    float coverage  = albedoSample.a;  // 0 = no tile rendered here, >0 = tile exists
     float emissive  = texture(uGNormEmissive, uv).b;
     vec3  light     = texture(uLightBuffer,   uv).rgb;
+
+    // Where there's no tile data, discard so the sky (rendered earlier) shows through
+    if (coverage < 0.01) discard;
 
     // Ambient colour: cool night → warm day
     vec3 ambient = mix(vec3(0.04, 0.05, 0.09), vec3(0.82, 0.79, 0.70), uSunlight);

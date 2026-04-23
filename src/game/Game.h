@@ -10,6 +10,10 @@
 #include "game/UISystem.h"
 #include "ecs/ECS.h"
 #include "ecs/Components.h"
+#include "vfx/ThemeRegistry.h"
+#include "vfx/UnifiedVFX.h"
+#include "vfx/VFXCombo.h"
+#include "vfx/ScreenEffects.h"
 
 static constexpr int LOAD_RADIUS_X = 6;
 static constexpr int LOAD_RADIUS_Y = 5;
@@ -20,10 +24,13 @@ public:
 
     void run();
 
-    // ---- Accessors (for subclasses / scripting) -----------------------------
-    EntityManager&  entities()  { return m_em; }
-    World&          world()     { return m_world; }
-    RenderPipeline& pipeline()  { return m_pipeline; }
+    // ---- Accessors ----------------------------------------------------------
+    EntityManager&  entities()    { return m_em;       }
+    World&          world()       { return m_world;    }
+    RenderPipeline& pipeline()    { return m_pipeline; }
+    UnifiedVFX&     vfx()         { return m_vfx;      }
+    ThemeRegistry&  themes()      { return ThemeRegistry::instance(); }
+    ScreenEffects&  screen()      { return m_screenFX; }
 
 private:
     // ---- Subsystems ---------------------------------------------------------
@@ -38,16 +45,20 @@ private:
     ParticleManager m_particles;
     UISystem        m_ui;
 
+    // ---- VFX layer ----------------------------------------------------------
+    ScreenEffects   m_screenFX;
+    UnifiedVFX      m_vfx;
+
     // ---- ECS entity IDs -----------------------------------------------------
     EntityID m_playerEntity = NULL_ENTITY;
 
     // ---- Game state ---------------------------------------------------------
-    bool  m_running       = true;
-    bool  m_showInventory = false;
-    float m_dayTime       = 0.5f;   // 0=midnight, 0.5=noon
-    float m_dayDuration   = 600.f;  // seconds per full day
-    float m_sunlight      = 1.0f;
-    float m_totalTime     = 0.f;    // cumulative seconds (for shaders)
+    bool  m_running        = true;
+    bool  m_showInventory  = false;
+    float m_dayTime        = 0.5f;
+    float m_dayDuration    = 600.f;
+    float m_sunlight       = 1.0f;
+    float m_totalTime      = 0.f;
 
     // ---- Per-frame ----------------------------------------------------------
     void processInput();
@@ -59,4 +70,7 @@ private:
     // ---- Helpers ------------------------------------------------------------
     float     computeSunlight() const;
     glm::vec2 cameraTarget()    const;
+
+    // ---- Apply theme to post-process settings --------------------------------
+    void applyThemeToPostProcess(const Theme* theme);
 };

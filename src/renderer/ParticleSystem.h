@@ -4,15 +4,33 @@
 #include <vector>
 #include <array>
 #include "renderer/Shader.h"
-#include "renderer/Texture.h"
-#include "renderer/RenderTarget.h"
 #include "renderer/Camera.h"
 
 // ---- Particle types ---------------------------------------------------------
 enum class ParticlePreset {
+    // Original presets
     Fire, Smoke, Spark, Magic, Rain, Snow, Leaves, Blood, Dust, Explosion,
-    Bubble, Leaf, Custom
+    Bubble, Leaf,
+    // Music-engine presets (MagnumOpus-inspired)
+    MusicNote,    // Gold/purple floating note sparkles      (shape=3 sparkle)
+    Glyph,        // Arcane symbols, green/purple            (shape=3 sparkle)
+    BloomRing,    // Expanding hollow luminous ring          (shape=2 ring)
+    ElectricArc,  // Cyan/white fast velocity sparks         (shape=0 glow)
+    SakuraPetal,  // Pink swirling soft petals               (shape=1 circle)
+    Feather,      // White/sky-blue drifting feathers        (shape=1 circle)
+    VoidTendril,  // Dark purple slow-rising void wisps      (shape=0 glow)
+    Custom        // Caller fills in the emitter manually
 };
+
+// ---- Particle shape ---------------------------------------------------------
+//  0 = soft glow (Gaussian) — default, HDR-bright core
+//  1 = solid circle
+//  2 = bloom ring (hollow)
+//  3 = sparkle / cross
+static constexpr float SHAPE_GLOW    = 0.f;
+static constexpr float SHAPE_CIRCLE  = 1.f;
+static constexpr float SHAPE_RING    = 2.f;
+static constexpr float SHAPE_SPARKLE = 3.f;
 
 // ---- Per-particle CPU state -------------------------------------------------
 struct Particle {
@@ -26,38 +44,43 @@ struct Particle {
     float     rotVel;
     float     life;      // remaining life in seconds
     float     maxLife;
-    bool      alive = false;
+    float     shape  = SHAPE_GLOW;
+    bool      alive  = false;
 };
 
 // ---- Emitter config ---------------------------------------------------------
 struct ParticleEmitter {
     glm::vec2     origin;
-    glm::vec2     originVariance  = {8.f, 4.f}; // position randomness
-    glm::vec2     direction       = {0.f, -1.f};// base velocity direction
+    glm::vec2     originVariance  = {8.f, 4.f};
+    glm::vec2     direction       = {0.f, -1.f};
     float         speed           = 80.f;
     float         speedVariance   = 40.f;
-    float         spread          = 0.8f;        // angular spread in radians
-    float         emitRate        = 20.f;        // particles per second
+    float         spread          = 0.8f;       // angular spread (radians)
+    float         emitRate        = 20.f;       // particles per second
     float         lifeMin         = 0.5f;
     float         lifeMax         = 1.5f;
-    glm::vec4     colorStart      = {1.f,.5f,0.f,1.f};
-    glm::vec4     colorEnd        = {0.3f,0.f,0.f,0.f};
+    glm::vec4     colorStart      = {1.f, .5f, 0.f, 1.f};
+    glm::vec4     colorEnd        = {0.3f, 0.f, 0.f, 0.f};
     float         sizeStart       = 6.f;
     float         sizeEnd         = 1.f;
-    float         gravity         = 0.f;         // pixels/s² downward
+    float         gravity         = 0.f;
+    float         shape           = SHAPE_GLOW;
     bool          loop            = true;
     bool          active          = true;
-    float         _accumulator    = 0.f;         // internal
+    float         _accumulator    = 0.f;
 };
 
 // ---- Per-instance GPU data --------------------------------------------------
+// Matches the instanced vertex attributes in particles.vert (locations 1-5).
 struct ParticleInstance {
-    glm::vec2 pos;
-    float     size;
-    float     rotation;
-    glm::vec4 color;
+    glm::vec2 pos;      // loc 1 — offset 0,  8 bytes
+    float     size;     // loc 2 — offset 8,  4 bytes
+    float     rotation; // loc 3 — offset 12, 4 bytes
+    glm::vec4 color;    // loc 4 — offset 16, 16 bytes
+    float     shape;    // loc 5 — offset 32, 4 bytes
+    float     _pad[3];  //         offset 36, 12 bytes (16-byte alignment)
 };
-static_assert(sizeof(ParticleInstance) == 32);
+static_assert(sizeof(ParticleInstance) == 48);
 
 // ---- ParticleSystem ---------------------------------------------------------
 class ParticleSystem {
@@ -70,7 +93,7 @@ public:
     ParticleSystem(const ParticleSystem&)            = delete;
     ParticleSystem& operator=(const ParticleSystem&) = delete;
 
-    // Emit a burst from a preset
+    // Emit a burst from a preset (count particles spawned immediately)
     void burst(glm::vec2 pos, ParticlePreset preset, int count = 20);
 
     // Add a continuous emitter (returns emitter index)
@@ -78,13 +101,10 @@ public:
     void removeEmitter(int idx);
     ParticleEmitter& emitter(int idx) { return m_emitters[idx]; }
 
-    // Apply a named preset to an emitter config
+    // Build an emitter config from a preset template
     static ParticleEmitter makePreset(ParticlePreset type, glm::vec2 origin);
 
-    // Update all alive particles
     void update(float dt);
-
-    // Draw all alive particles using instanced rendering
     void draw(const Shader& shader, const Camera& camera);
 
     int aliveCount() const;

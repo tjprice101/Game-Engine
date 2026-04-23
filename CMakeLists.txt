@@ -64,6 +64,7 @@ target_include_directories(GameEngine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ecs
     ${CMAKE_CURRENT_SOURCE_DIR}/src/game
     ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/vfx
     ${CMAKE_CURRENT_SOURCE_DIR}/src/world)
 
 target_link_libraries(GameEngine PRIVATE

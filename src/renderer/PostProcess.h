@@ -11,10 +11,11 @@
 //   Bloom → Tone Map → Color Grade → Chromatic Aberration → CRT → Vignette → FXAA
 
 struct BloomSettings {
-    bool  enabled       = true;
-    float threshold     = 0.7f;  // luminance threshold
-    float intensity     = 0.35f; // bloom strength
-    int   passes        = 6;     // downsample/upsample depth
+    bool      enabled       = true;
+    float     threshold     = 0.7f;   // luminance threshold
+    float     intensity     = 0.35f;  // bloom strength
+    int       passes        = 6;      // downsample/upsample depth
+    glm::vec3 tint          = {1.f, 1.f, 1.f}; // per-theme bloom color tint
 };
 
 struct ToneMapSettings {
@@ -56,15 +57,31 @@ struct FXAASettings {
     float spanMax   = 8.f;
 };
 
+// ---- Screen flash (additive overlay that fades out) -------------------------
+struct ScreenFlashSettings {
+    glm::vec4 color   = {0.f, 0.f, 0.f, 0.f}; // RGBA, alpha = strength
+};
+
+// ---- Screen distortion (warp / ripple / etc.) --------------------------------
+struct ScreenDistortSettings {
+    int       type     = 0;             // matches ScreenDistortion enum cast to int
+    float     strength = 0.f;
+    glm::vec2 center   = {0.5f, 0.5f}; // UV space
+    float     time     = 0.f;          // elapsed time for animated effects
+};
+
 struct PostProcessSettings {
-    BloomSettings     bloom;
-    ToneMapSettings   toneMap;
-    ColorGradeSettings colorGrade;
-    ChromAbSettings   chromAb;
-    CRTSettings       crt;
-    VignetteSettings  vignette;
-    FXAASettings      fxaa;
-    float             gamma = 2.2f;
+    BloomSettings        bloom;
+    ToneMapSettings      toneMap;
+    ColorGradeSettings   colorGrade;
+    ChromAbSettings      chromAb;
+    CRTSettings          crt;
+    VignetteSettings     vignette;
+    FXAASettings         fxaa;
+    ScreenFlashSettings  flash;
+    ScreenDistortSettings distort;
+    float                time  = 0.f;  // cumulative time (for animated distorts)
+    float                gamma = 2.2f;
 };
 
 class PostProcess {

@@ -57,6 +57,6 @@ void main() {
     // Emissive: tiles with high red channel and low blue/green are torches/lava
     float emissive = max(0.0, albedo.r - albedo.b - albedo.g * 0.5) * 0.8;
 
-    gAlbedoSpec     = vec4(albedo, spec);
+    gAlbedoSpec     = vec4(albedo, 1.0);  // alpha=1 flags tile presence for composite
     gNormalEmissive = vec3(encodedN, emissive);
 }

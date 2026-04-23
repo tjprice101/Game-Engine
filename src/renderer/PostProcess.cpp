@@ -151,6 +151,7 @@ void PostProcess::apply(GLuint sourceHDR, const PostProcessSettings& cfg) {
         tm.setFloat("uExposure",       cfg.toneMap.exposure);
         tm.setFloat("uGamma",          cfg.gamma);
         tm.setFloat("uBloomIntensity", cfg.bloom.enabled ? cfg.bloom.intensity : 0.f);
+        tm.setVec3 ("uBloomTint",      cfg.bloom.enabled ? cfg.bloom.tint : glm::vec3{1.f});
         tm.setFloat("uSaturation",     cfg.colorGrade.saturation);
         tm.setFloat("uContrast",       cfg.colorGrade.contrast);
         tm.setVec3 ("uLift",           cfg.colorGrade.lift);
@@ -164,6 +165,12 @@ void PostProcess::apply(GLuint sourceHDR, const PostProcessSettings& cfg) {
         tm.setFloat("uVignetteSoft",   cfg.vignette.softness);
         tm.setFloat("uFXAASpanMax",    cfg.fxaa.enabled ? cfg.fxaa.spanMax : 0.f);
         tm.setVec2 ("uResolution",     { (float)m_vpW, (float)m_vpH });
+        tm.setVec4 ("uFlashColor",     cfg.flash.color);
+        tm.setFloat("uTime",           cfg.time);
+        tm.setInt  ("uDistortType",    cfg.distort.strength > 0.f ? cfg.distort.type : 0);
+        tm.setFloat("uDistortStr",     cfg.distort.strength);
+        tm.setVec2 ("uDistortCenter",  cfg.distort.center);
+
 
         glBindVertexArray(m_fsVAO);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);

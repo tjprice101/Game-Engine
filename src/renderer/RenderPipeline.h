@@ -11,6 +11,8 @@
 #include "renderer/SpriteBatch.h"
 #include "renderer/ParticleSystem.h"
 #include "renderer/TileRenderer.h"
+#include "renderer/TrailRenderer.h"
+#include "renderer/BeamRenderer.h"
 #include "renderer/UniformBuffer.h"
 #include "renderer/ShaderLibrary.h"
 #include "game/CameraController.h"
@@ -21,15 +23,17 @@
 
 // ---- RenderPipeline ---------------------------------------------------------
 // Orchestrates all rendering passes in order:
-//   [1] Sky/BG pass
-//   [2] Occluder pass (into LightSystem)
-//   [3] Shadow pass (inside LightSystem::compute)
-//   [4] Geometry pass → GBuffer
-//   [5] Light accumulation pass (inside LightSystem::compute)
-//   [6] Particle pass
-//   [7] Composite pass → HDR FBO
-//   [8] Post-process (bloom, tonemap, grade, CRT, vignette, FXAA)
-//   [9] UI pass
+//   [1]  Sky/BG pass
+//   [2]  Occluder pass  (into LightSystem)
+//   [3]  Shadow pass    (inside LightSystem::compute)
+//   [4]  Geometry pass  → GBuffer
+//   [5]  Light accum    (inside LightSystem::compute)
+//   [6]  Particle pass
+//   [7]  Composite pass → HDR FBO
+//   [8]  Trail pass     → HDR FBO  (additive)
+//   [9]  Beam pass      → HDR FBO  (additive)
+//   [10] Post-process   (bloom tint, tonemap, grade, flash, distort, FXAA)
+//   [11] UI pass
 
 class RenderPipeline {
 public:
@@ -44,26 +48,25 @@ public:
     void onResize(int viewW, int viewH);
 
     // ---- Per-frame rendering ------------------------------------------------
-    // Call this once per frame with all required scene data.
-    // `drawOccluders` is a callback that renders solid geometry into the
-    //  currently bound FBO (used by LightSystem for shadow generation).
     void render(
-        const Camera&          camera,
+        const Camera&           camera,
         const CameraController& camCtrl,
-        World&                 world,
-        EntityManager&         em,
-        ParticleManager&       particles,
-        UISystem&              ui,
-        float                  dayTime,
-        float                  sunlight,
-        float                  time
+        World&                  world,
+        EntityManager&          em,
+        ParticleManager&        particles,
+        UISystem&               ui,
+        float                   dayTime,
+        float                   sunlight,
+        float                   time
     );
 
     // ---- Sub-system access --------------------------------------------------
-    LightSystem&          lightSystem()   { return m_lightSys;  }
-    PostProcess&          postProcess()   { return m_postProc;  }
+    LightSystem&          lightSystem()   { return m_lightSys;    }
+    PostProcess&          postProcess()   { return m_postProc;    }
     PostProcessSettings&  ppSettings()    { return m_postProc.settings(); }
     SpriteBatch&          spriteBatch()   { return m_spriteBatch; }
+    TrailRenderer&        trailRenderer() { return m_trails;      }
+    BeamRenderer&         beamRenderer()  { return m_beams;       }
 
     // ---- Debug --------------------------------------------------------------
     bool wireframe      = false;
@@ -71,12 +74,14 @@ public:
 
 private:
     // ---- Passes -------------------------------------------------------------
-    void passSky   (float dayTime, float sunlight, float time);
-    void passGBuffer(const Camera& cam, World& world);
-    void passSprites(const Camera& cam, EntityManager& em);
+    void passSky      (float dayTime, float sunlight, float time);
+    void passGBuffer  (const Camera& cam, World& world);
+    void passSprites  (const Camera& cam, EntityManager& em);
     void passComposite(float sunlight);
     void passParticles(const Camera& cam, ParticleManager& particles);
-    void passUI(UISystem& ui, int w, int h);
+    void passTrails   (const Camera& cam);
+    void passBeams    (const Camera& cam, float time);
+    void passUI       (UISystem& ui, int w, int h);
 
     // ---- Helpers ------------------------------------------------------------
     void buildFullscreenQuad();
@@ -89,10 +94,12 @@ private:
     PostProcess    m_postProc;
     SpriteBatch    m_spriteBatch;
     TileRenderer   m_tileRenderer;
+    TrailRenderer  m_trails;
+    BeamRenderer   m_beams;
 
     // ---- Render targets -----------------------------------------------------
-    RenderTarget   m_gBuffer;   // attachment 0=albedo/spec (RGBA8), 1=normal/emissive (RGB16F)
-    RenderTarget   m_hdrFBO;    // RGBA16F HDR composite (before post-process)
+    RenderTarget   m_gBuffer;  // albedo/spec (RGBA8) + normal/emissive (RGB16F)
+    RenderTarget   m_hdrFBO;   // RGBA16F HDR composite (before post-process)
 
     // ---- UBOs ---------------------------------------------------------------
     UniformBuffer  m_cameraUBO;
@@ -111,6 +118,6 @@ private:
     // ---- Viewport -----------------------------------------------------------
     int m_vpW = 0, m_vpH = 0;
 
-    // ---- Sky background VBO (simple gradient quad) --------------------------
+    // ---- Sky background VBO -------------------------------------------------
     GLuint m_skyVAO = 0, m_skyVBO = 0;
 };

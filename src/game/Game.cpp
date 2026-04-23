@@ -25,8 +25,18 @@ Game::Game(const WindowConfig& cfg)
     // Build tile atlas before pipeline init (pipeline loads shaders that sample it)
     TileRegistry::instance().buildAtlas();
 
-    // Init rendering pipeline
+    // Init rendering pipeline (also inits trails and beams)
     m_pipeline.init(cfg.width, cfg.height);
+
+    // ---- VFX system init ----------------------------------------------------
+    ThemeRegistry::instance().loadDefaults();
+    m_vfx.init(&m_particles,
+               &m_pipeline.trailRenderer(),
+               &m_pipeline.beamRenderer(),
+               &m_screenFX);
+    // Start with MoonlightSonata theme
+    m_vfx.setTheme(ThemeRegistry::instance().active());
+    applyThemeToPostProcess(ThemeRegistry::instance().active());
 
     // Camera controller defaults
     m_camCtrl.minZoom    = 0.5f;
@@ -125,6 +135,7 @@ void Game::update(float dt) {
 
     // ---- Particle update -----------------------------------------------
     m_particles.update(dt);
+    m_screenFX.update(dt);
 
     // Spawn particles from ECS emitters
     m_em.view<CTransform, CParticleEmitter>([&](EntityID, const CTransform& xf, const CParticleEmitter& pe) {
@@ -213,6 +224,20 @@ void Game::renderFrame() {
                                TileRegistry::instance().atlas().id());
     }
 
+    // ---- Apply screen effects to camera (shake offset) ----------------------
+    ScreenEffectParams fx = m_screenFX.params();
+    glm::vec2 origCamPos  = m_camera.position();
+    if (glm::length(fx.shakeOffset) > 0.001f)
+        m_camera.setPosition(origCamPos + fx.shakeOffset);
+
+    // ---- Apply screen effects to post-process (flash + distortion) ----------
+    auto& ppCfg             = m_pipeline.ppSettings();
+    ppCfg.flash.color       = fx.flashColor;
+    ppCfg.distort.type      = static_cast<int>(fx.distortType);
+    ppCfg.distort.strength  = fx.distortStr;
+    ppCfg.distort.center    = fx.distortCenter;
+    ppCfg.distort.time      = fx.distortTime;
+
     // Run all render passes
     m_pipeline.render(
         m_camera, m_camCtrl,
@@ -220,6 +245,10 @@ void Game::renderFrame() {
         m_ui,
         m_dayTime, m_sunlight, m_totalTime
     );
+
+    // Restore camera position after shake
+    if (glm::length(fx.shakeOffset) > 0.001f)
+        m_camera.setPosition(origCamPos);
 }
 
 // ---- Helpers ----------------------------------------------------------------
@@ -234,4 +263,25 @@ glm::vec2 Game::cameraTarget() const {
     glm::vec2 c = m_player.center();
     c.y -= 20.f;
     return c;
+}
+
+// ---- Theme → PostProcess ----------------------------------------------------
+// Maps a Theme's visual config to the PostProcess settings.
+// Call when switching themes (or once at startup with the default theme).
+void Game::applyThemeToPostProcess(const Theme* theme) {
+    if (!theme) return;
+    auto& pp = m_pipeline.ppSettings();
+
+    // Bloom
+    pp.bloom.intensity  = theme->vfx.bloomIntensity;
+    pp.bloom.threshold  = theme->vfx.bloomThreshold;
+    pp.bloom.tint       = theme->vfx.bloomTint;
+
+    // Chromatic aberration
+    pp.chromAb.enabled  = theme->vfx.chromaticAb;
+    pp.chromAb.strength = theme->vfx.chromaticStr;
+
+    // Color grade: lift shadows, tint highlights
+    pp.colorGrade.lift  = theme->palette.liftGrade;
+    pp.colorGrade.gain  = theme->palette.gainGrade;
 }

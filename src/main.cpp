@@ -1,5 +1,6 @@
 #include "game/Game.h"
 #include <iostream>
+#include <memory>
 
 int main() {
     try {
@@ -10,8 +11,8 @@ int main() {
         cfg.vsync     = true;
         cfg.resizable = true;
 
-        Game game(cfg);
-        game.run();
+        auto game = std::make_unique<Game>(cfg);
+        game->run();
     } catch (const std::exception& e) {
         std::cerr << "[FATAL] " << e.what() << '\n';
         return 1;
